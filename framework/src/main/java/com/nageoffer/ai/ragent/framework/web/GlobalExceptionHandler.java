@@ -46,6 +46,8 @@ import java.util.Optional;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    private static final String SSE_CONTENT_TYPE = "text/event-stream";
+
     @Value("${spring.servlet.multipart.max-file-size:50MB}")
     private String maxFileSize;
 
@@ -72,6 +74,11 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(value = {AbstractException.class})
     public Result<Void> abstractException(HttpServletRequest request, AbstractException ex) {
+        if (isSseRequest(request)) {
+            // SSE 请求的异常已通过 StreamCallback.onError() 处理，此处仅记录日志
+            log.warn("[{}] {} [sse-ex] {}", request.getMethod(), getUrl(request), ex.getMessage());
+            return null;
+        }
         if (ex.getCause() != null) {
             log.error("[{}] {} [ex] {}", request.getMethod(), request.getRequestURL().toString(), ex, ex.getCause());
             return Results.failure(ex);
@@ -125,8 +132,26 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(value = Throwable.class)
     public Result<Void> defaultErrorHandler(HttpServletRequest request, Throwable throwable) {
+        if (isSseRequest(request)) {
+            // SSE 请求的异常已通过 StreamCallback.onError() 处理，此处仅记录日志
+            log.warn("[{}] {} [sse-ex] {}", request.getMethod(), getUrl(request), throwable.getMessage());
+            return null;
+        }
         log.error("[{}] {} ", request.getMethod(), getUrl(request), throwable);
         return Results.failure();
+    }
+
+    /**
+     * 判断当前请求是否为 SSE 流式请求
+     * 通过检查响应 Content-Type 或 Accept 头是否包含 text/event-stream
+     */
+    private boolean isSseRequest(HttpServletRequest request) {
+        String contentType = request.getContentType();
+        if (StrUtil.isNotBlank(contentType) && contentType.contains(SSE_CONTENT_TYPE)) {
+            return true;
+        }
+        String accept = request.getHeader("Accept");
+        return StrUtil.isNotBlank(accept) && accept.contains(SSE_CONTENT_TYPE);
     }
 
     private String getUrl(HttpServletRequest request) {

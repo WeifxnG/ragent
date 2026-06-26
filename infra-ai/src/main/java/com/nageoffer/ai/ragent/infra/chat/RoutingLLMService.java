@@ -103,7 +103,11 @@ public class RoutingLLMService implements LLMService {
     public StreamCancellationHandle streamChat(ChatRequest request, StreamCallback callback) {
         List<ModelTarget> targets = selector.selectChatCandidates(Boolean.TRUE.equals(request.getThinking()));
         if (CollUtil.isEmpty(targets)) {
-            throw new RemoteException(STREAM_NO_PROVIDER_MESSAGE);
+            String message = Boolean.TRUE.equals(request.getThinking())
+                    ? "深度思考模式暂不可用，所有支持深度思考的模型均无法访问"
+                    : STREAM_NO_PROVIDER_MESSAGE;
+            notifyNoProvider(callback, message);
+            return null;
         }
 
         String label = ModelCapability.CHAT.getDisplayName();
@@ -152,8 +156,10 @@ public class RoutingLLMService implements LLMService {
             lastError = buildLastErrorAndLog(result, target, label);
         }
 
-        // 所有模型都失败了，通知客户端错误
-        throw notifyAllFailed(callback, lastError);
+        // 所有模型都失败了，通过回调通知客户端错误，不再抛出异常
+        // 避免异常传播到 Servlet 层导致 SSE 响应冲突（HttpMessageNotWritableException）
+        notifyAllFailed(callback, lastError);
+        return null;
     }
 
     private ChatClient resolveClient(ModelTarget target, String label) {
@@ -210,14 +216,21 @@ public class RoutingLLMService implements LLMService {
         }
     }
 
-    private RemoteException notifyAllFailed(StreamCallback callback, Throwable lastError) {
+    private void notifyAllFailed(StreamCallback callback, Throwable lastError) {
         RemoteException finalException = new RemoteException(
                 STREAM_ALL_FAILED_MESSAGE,
                 lastError,
                 BaseErrorCode.REMOTE_ERROR
         );
+        log.error("{}，最后错误：{}", STREAM_ALL_FAILED_MESSAGE,
+                lastError != null ? lastError.getMessage() : "unknown", lastError);
         callback.onError(finalException);
-        return finalException;
+    }
+
+    private void notifyNoProvider(StreamCallback callback, String message) {
+        RemoteException exception = new RemoteException(message, BaseErrorCode.REMOTE_ERROR);
+        log.error("无可用模型提供者：{}", message);
+        callback.onError(exception);
     }
 
     private ModelTarget resolveTarget(String modelId, boolean deepThinking) {

@@ -32,6 +32,7 @@ import com.nageoffer.ai.ragent.rag.core.memory.ConversationMemoryService;
 import lombok.extern.slf4j.Slf4j;
 import com.nageoffer.ai.ragent.rag.service.ConversationGroupService;
 
+import java.util.Map;
 import java.util.Optional;
 
 @Slf4j
@@ -180,6 +181,10 @@ public class StreamChatEventHandler implements StreamCallback {
             return;
         }
         taskManager.unregister(taskId);
+        // 先发送错误事件，让前端能获取到具体错误信息
+        String errorMessage = t != null ? t.getMessage() : "未知错误";
+        sender.sendEvent(SSEEventType.ERROR.value(), Map.of("error", errorMessage));
+        sender.sendEvent(SSEEventType.DONE.value(), "[DONE]");
         sender.fail(t);
     }
 
